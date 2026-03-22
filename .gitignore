@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/soccer_swarm.db
+models/
+results/
+.env
+*.egg-info/
+.venv/
