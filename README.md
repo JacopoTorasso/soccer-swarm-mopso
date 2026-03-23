@@ -182,9 +182,6 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-```
-42 passed in ~2s
-```
 
 ## API-Football Free Tier
 
