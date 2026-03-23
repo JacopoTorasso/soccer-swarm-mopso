@@ -38,28 +38,8 @@ class BacktestEngine:
             logger.warning("Not enough fixtures for backtest: %d", len(completed))
             return {"global": {"accuracy": 0, "roi": 0, "max_drawdown": 0, "total_bets": 0}}
 
-        # Train agents on all data
-        for agent in self.agents:
-            try:
-                agent.train(completed, [])
-            except TypeError:
-                agent.train(completed, [], standings=standings)
-
-        # Precompute predictions
         n_agents = len(self.agents)
         n_fixtures = len(completed)
-        agent_preds = np.zeros((n_agents, n_fixtures, 7))
-
-        for a_idx, agent in enumerate(self.agents):
-            for f_idx, f in enumerate(completed):
-                try:
-                    pred = agent.predict(f)
-                except TypeError:
-                    pred = agent.predict(f, history=completed, standings=standings)
-                if pred is not None:
-                    agent_preds[a_idx, f_idx] = pred.as_array()
-                else:
-                    agent_preds[a_idx, f_idx] = np.array([1/3, 1/3, 1/3, 0.5, 0.5, 0.5, 0.5])
 
         # Build actuals
         result_1x2 = np.array([
@@ -117,9 +97,33 @@ class BacktestEngine:
             if len(train_indices) < MIN_FIXTURES_FOR_TRAINING or len(test_indices) == 0:
                 continue
 
-            train_preds = agent_preds[:, train_indices, :]
+            # Retrain agents on training window only (no data leakage)
+            train_fixtures = [completed[idx] for idx in train_indices]
+            for agent in self.agents:
+                try:
+                    agent.train(train_fixtures, [])
+                except TypeError:
+                    agent.train(train_fixtures, [], standings=standings)
+
+            # Compute predictions for train + test using only train-fitted agents
+            window_indices = train_indices + test_indices
+            agent_preds_window = np.zeros((n_agents, len(window_indices), 7))
+            for a_idx, agent in enumerate(self.agents):
+                for w_idx, f_idx in enumerate(window_indices):
+                    f = completed[f_idx]
+                    try:
+                        pred = agent.predict(f)
+                    except TypeError:
+                        pred = agent.predict(f, history=train_fixtures, standings=standings)
+                    if pred is not None:
+                        agent_preds_window[a_idx, w_idx] = pred.as_array()
+                    else:
+                        agent_preds_window[a_idx, w_idx] = np.array([1/3, 1/3, 1/3, 0.5, 0.5, 0.5, 0.5])
+
+            n_train = len(train_indices)
+            train_preds = agent_preds_window[:, :n_train, :]
             train_actuals_w = {k: v[train_indices] for k, v in actuals.items()}
-            test_preds = agent_preds[:, test_indices, :]
+            test_preds = agent_preds_window[:, n_train:, :]
             test_actuals_w = {k: v[test_indices] for k, v in actuals.items()}
 
             # Run MOPSO on training window

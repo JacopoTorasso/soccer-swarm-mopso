@@ -9,9 +9,12 @@ class SwarmProblem(Problem):
         """
         agent_predictions: shape (n_agents, n_fixtures, 7)
         actuals: dict with result_1x2, result_ou, result_btts, implied_odds_1x2
+                 optional: implied_odds_ou (n,2), implied_odds_btts (n,2)
         """
         self.agent_preds = agent_predictions
         self.actuals = actuals
+        self.has_ou_odds = "implied_odds_ou" in actuals
+        self.has_btts_odds = "implied_odds_btts" in actuals
         n_agents = agent_predictions.shape[0]
 
         super().__init__(
@@ -70,31 +73,43 @@ class SwarmProblem(Problem):
                     won = 1.0 if best_idx == result_1x2[j] else 0.0
                     all_pnl.append(won * implied[j, best_idx] - 1.0)
 
-            # O/U bets
-            for j in range(n_fix):
-                p_over = ensemble[j, 3]
-                implied_over = 0.5
-                edge = p_over - implied_over
-                if abs(edge) > thresh_ou:
-                    bet_over = edge > 0
-                    actual_over = result_ou[j] == 1
-                    if bet_over == actual_over:
-                        all_pnl.append(1.0 / max(implied_over if bet_over else (1 - implied_over), 0.1) - 1.0)
-                    else:
-                        all_pnl.append(-1.0)
+            # O/U bets (only when real odds are available)
+            if self.has_ou_odds:
+                implied_ou = self.actuals["implied_odds_ou"]
+                for j in range(n_fix):
+                    p_over = ensemble[j, 3]
+                    imp_over = 1.0 / implied_ou[j, 0]
+                    imp_under = 1.0 / implied_ou[j, 1]
+                    total_imp = imp_over + imp_under
+                    fair_over = imp_over / total_imp
+                    edge = p_over - fair_over
+                    if abs(edge) > thresh_ou:
+                        bet_over = edge > 0
+                        actual_over = result_ou[j] == 1
+                        odds_val = implied_ou[j, 0] if bet_over else implied_ou[j, 1]
+                        if bet_over == actual_over:
+                            all_pnl.append(odds_val - 1.0)
+                        else:
+                            all_pnl.append(-1.0)
 
-            # BTTS bets
-            for j in range(n_fix):
-                p_yes = ensemble[j, 5]
-                implied_yes = 0.5
-                edge = p_yes - implied_yes
-                if abs(edge) > thresh_btts:
-                    bet_yes = edge > 0
-                    actual_yes = result_btts[j] == 1
-                    if bet_yes == actual_yes:
-                        all_pnl.append(1.0 / max(implied_yes if bet_yes else (1 - implied_yes), 0.1) - 1.0)
-                    else:
-                        all_pnl.append(-1.0)
+            # BTTS bets (only when real odds are available)
+            if self.has_btts_odds:
+                implied_btts = self.actuals["implied_odds_btts"]
+                for j in range(n_fix):
+                    p_yes = ensemble[j, 5]
+                    imp_yes = 1.0 / implied_btts[j, 0]
+                    imp_no = 1.0 / implied_btts[j, 1]
+                    total_imp = imp_yes + imp_no
+                    fair_yes = imp_yes / total_imp
+                    edge = p_yes - fair_yes
+                    if abs(edge) > thresh_btts:
+                        bet_yes = edge > 0
+                        actual_yes = result_btts[j] == 1
+                        odds_val = implied_btts[j, 0] if bet_yes else implied_btts[j, 1]
+                        if bet_yes == actual_yes:
+                            all_pnl.append(odds_val - 1.0)
+                        else:
+                            all_pnl.append(-1.0)
 
             pnl_arr = np.array(all_pnl) if all_pnl else np.array([0.0])
             total_bets = len(all_pnl)
