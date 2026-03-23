@@ -238,6 +238,40 @@ def cmd_predict(args):
         print(output)
 
 
+def cmd_fetch_csv(args):
+    """Fetch data from football-data.co.uk (free, no API key needed)."""
+    from soccer_swarm.data.db import get_connection, create_tables
+    from soccer_swarm.data.csv_import import import_season, import_upcoming, generate_remaining_fixtures
+
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    conn = get_connection(DB_PATH)
+    create_tables(conn)
+
+    total = 0
+
+    if args.season:
+        print(f"Importing season {args.season} from football-data.co.uk...")
+        total += import_season(conn, args.season)
+
+    if args.upcoming:
+        print("Importing upcoming fixtures from football-data.co.uk...")
+        total += import_upcoming(conn)
+
+    if args.generate_remaining:
+        print("Generating remaining season fixtures...")
+        total += generate_remaining_fixtures(conn)
+
+    if not args.season and not args.upcoming and not args.generate_remaining:
+        # Default: import current season + generate remaining
+        print("Importing season 2526 from football-data.co.uk...")
+        total += import_season(conn, "2526")
+        print("Generating remaining season fixtures...")
+        total += generate_remaining_fixtures(conn)
+
+    conn.close()
+    print(f"Import complete. {total} new fixtures added.")
+
+
 def cmd_pareto(args):
     from soccer_swarm.optimizer.mopso import load_pareto, select_from_pareto
     import numpy as np
@@ -287,6 +321,12 @@ def main():
     p_pred.add_argument("--output", type=str, default=None)
     p_pred.add_argument("--profile", type=str, default="balanced")
 
+    # fetch-csv
+    p_csv = subparsers.add_parser("fetch-csv", help="Fetch data from football-data.co.uk (free)")
+    p_csv.add_argument("--season", type=str, default=None, help="Season code e.g. 2526 for 2025/26")
+    p_csv.add_argument("--upcoming", action="store_true", help="Fetch upcoming fixtures")
+    p_csv.add_argument("--generate-remaining", action="store_true", help="Generate remaining season fixtures")
+
     # pareto
     p_pareto = subparsers.add_parser("pareto", help="Inspect Pareto front")
     p_pareto.add_argument("--profile", type=str, default="balanced")
@@ -297,6 +337,7 @@ def main():
 
     commands = {
         "fetch": cmd_fetch,
+        "fetch-csv": cmd_fetch_csv,
         "train": cmd_train,
         "optimize": cmd_optimize,
         "backtest": cmd_backtest,
